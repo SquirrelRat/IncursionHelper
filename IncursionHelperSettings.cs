@@ -50,7 +50,7 @@ public class IncursionHelperSettings : ISettings
     public Dictionary<string, int> RoomTierOverrides { get; set; } = new();
 
     [Menu("S-Tier Room Color", "Corruption Locus, Doryani, Temple Nexus, Vault by default.")]
-    public ColorNode STierColor { get; set; } = new ColorNode(SharpDX.Color.Purple);
+    public ColorNode STierColor { get; set; } = new ColorNode(SharpDX.Color.Magenta);
 
     [Menu("A-Tier Room Color", "High-value farms like Apex, Anomaly, Legion, Strongboxes.")]
     public ColorNode ATierColor { get; set; } = new ColorNode(SharpDX.Color.Green);

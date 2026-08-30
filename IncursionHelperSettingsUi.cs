@@ -170,8 +170,7 @@ public partial class IncursionHelper
         var entries = allKeys
             .Where(k => _roomTierFilter == 0 || Settings.RoomTierOverrides[k] == TierFilterToRank(_roomTierFilter))
             .Where(k => _roomSearchFilter.Length == 0 || k.Contains(_roomSearchFilter, StringComparison.OrdinalIgnoreCase) || (DefaultImportantRooms.FirstOrDefault(r => r.Tier1Name == k)?.Tier3Name.Contains(_roomSearchFilter, StringComparison.OrdinalIgnoreCase) ?? false))
-            .OrderByDescending(k => Settings.RoomTierOverrides[k])
-            .ThenBy(k => k)
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         ImGui.Text($"{entries.Count} rooms shown");
