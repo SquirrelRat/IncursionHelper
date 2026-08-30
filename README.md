@@ -32,7 +32,6 @@ A clean, customizable, all-in-one helper for Alva and the Temple of Atzoatl.
 
     * **Red = Locked:** That wall still needs a Stone of Passage.
     * **Green = Suggested:** The single best locked wall to open next, also framed on the little diamond preview and on the room itself with an `Open This Door` label.
-    * **Clean by Design:** Already-open walls are not drawn, no screenshot parsing, no pixel checks — just the diamond tooltip data (`c3[13][0][3..8]`) the game already exposes.
 
 * **Incursions Remaining:** Reads `12 Incursions Remaining` from the window and adjusts strategy — early incursions bias `Change`, late incursions bias `Upgrade`.
 
