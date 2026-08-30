@@ -94,49 +94,25 @@ public partial class IncursionHelper
 
         ImGui.SeparatorText("Reset");
         if (ImGui.Button("Reset Weights to Default"))
-        {
-            Settings.WeightTier.Value = 10;
-            Settings.WeightUpgrade.Value = 2;
-            Settings.WeightScarcity.Value = 1;
-            Settings.WeightChangeEarly.Value = 2;
-            Settings.WeightUpgradeLate.Value = 4;
-            Settings.WeightSTierBonus.Value = 1;
-            Settings.WeightUntieredPenalty.Value = 5;
-        }
+            ResetWeightsToDefaults();
     }
 
     private void DrawStrategyPopups()
     {
-        if (_loadDefaultOpen) ImGui.OpenPopup("Load Meta Profit?");
-        if (ImGui.BeginPopupModal("Load Meta Profit?", ref _loadDefaultOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        DrawConfirmPopup(ref _loadDefaultOpen, "Load Meta Profit?", "Replace current weights and per-room tiers with Meta Profit defaults (Locus/Doryani S-tier, Vault/Temple Nexus S).", LoadDefaultStrategy);
+        DrawConfirmPopup(ref _loadSeedOpen, "Load Seed Diversity?", "Balances toward seeding new types early. Good for first 5-6 incursions or SSF.", LoadSeedStrategy);
+        DrawConfirmPopup(ref _loadRushOpen, "Load Rush to T3?", "Push upgrades late - good when you already have your S-tier line on the map.", LoadRushStrategy);
+    }
+
+    private static void DrawConfirmPopup(ref bool open, string title, string body, Action onApply)
+    {
+        if (open) ImGui.OpenPopup(title);
+        if (ImGui.BeginPopupModal(title, ref open, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.TextWrapped("Replace current weights and per-room tiers with Meta Profit defaults (Locus/Doryani S-tier, Vault/Temple Nexus S).");
-            if (ImGui.Button("Apply"))
-            {
-                LoadDefaultStrategy();
-                _loadDefaultOpen = false;
-                ImGui.CloseCurrentPopup();
-            }
+            ImGui.TextWrapped(body);
+            if (ImGui.Button("Apply")) { onApply(); open = false; ImGui.CloseCurrentPopup(); }
             ImGui.SameLine();
-            if (ImGui.Button("Cancel")) { _loadDefaultOpen = false; ImGui.CloseCurrentPopup(); }
-            ImGui.EndPopup();
-        }
-        if (_loadSeedOpen) ImGui.OpenPopup("Load Seed Diversity?");
-        if (ImGui.BeginPopupModal("Load Seed Diversity?", ref _loadSeedOpen, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.TextWrapped("Balances toward seeding new types early. Good for first 5-6 incursions or SSF.");
-            if (ImGui.Button("Apply")) { LoadSeedStrategy(); _loadSeedOpen = false; ImGui.CloseCurrentPopup(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel")) { _loadSeedOpen = false; ImGui.CloseCurrentPopup(); }
-            ImGui.EndPopup();
-        }
-        if (_loadRushOpen) ImGui.OpenPopup("Load Rush to T3?");
-        if (ImGui.BeginPopupModal("Load Rush to T3?", ref _loadRushOpen, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.TextWrapped("Push upgrades late - good when you already have your S-tier line on the map.");
-            if (ImGui.Button("Apply")) { LoadRushStrategy(); _loadRushOpen = false; ImGui.CloseCurrentPopup(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel")) { _loadRushOpen = false; ImGui.CloseCurrentPopup(); }
+            if (ImGui.Button("Cancel")) { open = false; ImGui.CloseCurrentPopup(); }
             ImGui.EndPopup();
         }
     }
@@ -182,7 +158,7 @@ public partial class IncursionHelper
             }
             ImGui.EndCombo();
         }
-        HelpMarker("Filter by tier. Colours match Appearance -> Tier Frames. Counts: " + string.Join(", ", new[] { 4, 3, 2, 1, 0 }.Select(v => $"{TierLabels[v]}={Settings.RoomTierOverrides.Count(kv => kv.Value == v)}")));
+        HelpMarker("Filter by tier. Colours match Appearance -> Tier Frames. Counts: " + GetTierCountsLabel());
 
         var allKeys = Settings.RoomTierOverrides.Keys.ToList();
         if (allKeys.Count == 0)
@@ -205,7 +181,7 @@ public partial class IncursionHelper
             {
                 var v = Settings.RoomTierOverrides[name];
                 var rank = (TierRank)v;
-                var color = rank switch { TierRank.S => Settings.STierColor.Value, TierRank.A => Settings.ATierColor.Value, TierRank.B => Settings.BTierColor.Value, TierRank.C => Settings.CTierColor.Value, _ => Settings.UntieredRoomColor.Value };
+                var color = ColorForRank(rank);
                 var info = DefaultImportantRooms.FirstOrDefault(r => r.Tier1Name == name);
 
                 ImGui.PushStyleColor(ImGuiCol.Text, ToImGuiColor(color));
@@ -216,7 +192,7 @@ public partial class IncursionHelper
                 {
                     for (int i = 0; i < TierLabels.Length; i++)
                     {
-                        var tierColor = (TierRank)i switch { TierRank.S => Settings.STierColor.Value, TierRank.A => Settings.ATierColor.Value, TierRank.B => Settings.BTierColor.Value, TierRank.C => Settings.CTierColor.Value, _ => Settings.UntieredRoomColor.Value };
+                        var tierColor = ColorForRank((TierRank)i);
                         ImGui.PushStyleColor(ImGuiCol.Text, ToImGuiColor(tierColor));
                         bool sel = i == v;
                         if (ImGui.Selectable(TierLabels[i], sel))
@@ -244,7 +220,7 @@ public partial class IncursionHelper
         }
 
         ImGui.SeparatorText("Stats");
-        ImGui.Text($"S={Settings.RoomTierOverrides.Count(kv => kv.Value == 4)}  A={Settings.RoomTierOverrides.Count(kv => kv.Value == 3)}  B={Settings.RoomTierOverrides.Count(kv => kv.Value == 2)}  C={Settings.RoomTierOverrides.Count(kv => kv.Value == 1)}  Untiered={Settings.RoomTierOverrides.Count(kv => kv.Value == 0)}");
+        ImGui.Text(GetTierCountsLabelLong());
         ImGui.TextDisabled("Tip: S lines get the Purple/whatever frame on the map and score tier*Weight + bonuses in Strategy.");
     }
 
@@ -318,6 +294,9 @@ public partial class IncursionHelper
         if (ImGui.SliderInt($"{label}: {v}##{label}", ref v, node.Min, node.Max)) node.Value = v;
         if (help != null) HelpMarker(help);
     }
+
+    private string GetTierCountsLabel() => string.Join(", ", new[] { 4, 3, 2, 1, 0 }.Select(v => $"{TierLabels[v]}={Settings.RoomTierOverrides.Count(kv => kv.Value == v)}"));
+    private string GetTierCountsLabelLong() => $"S={Settings.RoomTierOverrides.Count(kv => kv.Value == 4)}  A={Settings.RoomTierOverrides.Count(kv => kv.Value == 3)}  B={Settings.RoomTierOverrides.Count(kv => kv.Value == 2)}  C={Settings.RoomTierOverrides.Count(kv => kv.Value == 1)}  Untiered={Settings.RoomTierOverrides.Count(kv => kv.Value == 0)}";
 
     private static void Section(string title) => ImGui.SeparatorText(title);
     private static Vector4 ToImGuiColor(SharpDX.Color c) => new(c.R / 255f, c.G / 255f, c.B / 255f, c.A / 255f);

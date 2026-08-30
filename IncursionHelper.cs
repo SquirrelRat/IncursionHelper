@@ -139,6 +139,45 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
         catch { return null; }
     }
 
+    // Encapsulate Message Chains: single entry points for deep panel navigation (fixes fragile hard-coded indices)
+    private static Element TryGetIncursionRooms(IncursionWindow panel) => SafeGet(panel, 3);
+
+    private static Element TryGetDiamond(IncursionWindow panel)
+    {
+        var diamond = SafeGet(panel, 3, 13, 0);
+        if (diamond != null && diamond.IsVisible && diamond.ChildCount >= 9) return diamond;
+        // Robust fallback: find any visible container with 6 door tooltips underneath (SimpleInformation-style resilient)
+        try
+        {
+            var fb = panel?.FindChildRecursive(e =>
+            {
+                if (e == null || !e.IsVisible || e.ChildCount < 9) return false;
+                int hits = 0;
+                for (int i = 3; i < e.ChildCount && i <= 8; i++)
+                {
+                    var dotParent = SafeGet(e, i);
+                    var dot = SafeGet(dotParent, 1);
+                    if (dot?.Tooltip != null && dot.Tooltip.Text != null && dot.Tooltip.Text.IndexOf("Door to", StringComparison.OrdinalIgnoreCase) >= 0)
+                        hits++;
+                }
+                return hits >= 2;
+            }, 10);
+            return fb;
+        }
+        catch { return diamond; }
+    }
+
+    private static Element TryGetSelectedRoom(Element incursionRooms)
+    {
+        if (incursionRooms == null) return null;
+        foreach (var item in incursionRooms.Children)
+        {
+            var hl = SafeGet(item, 2);
+            if (hl != null && hl.IsVisible) return item;
+        }
+        return null;
+    }
+
     private string ExtractRoomNameFromRewardString(string rewardString)
     {
         if (string.IsNullOrWhiteSpace(rewardString)) return string.Empty;
@@ -243,29 +282,18 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
 
     private int GetEffectiveTierValue(RoomInfo info) => (int)GetEffectiveRank(info);
 
-    private void EnsureRoomTierOverrides()
+    // --- Shared helpers to kill Duplicated Code / Data Clumps ---
+    private static void PopulateRoomTierOverridesFromDefaults(Dictionary<string, int> target, IEnumerable<RoomInfo> source, bool overwrite)
     {
-        if (Settings.RoomTierOverrides == null) Settings.RoomTierOverrides = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        if (Settings.RoomTierOverrides.Count == 0)
+        foreach (var r in source)
         {
-            foreach (var r in DefaultImportantRooms)
-            {
-                if (!string.IsNullOrWhiteSpace(r.Tier1Name) && !Settings.RoomTierOverrides.ContainsKey(r.Tier1Name))
-                    Settings.RoomTierOverrides[r.Tier1Name] = (int)r.Rank;
-            }
-        }
-        else
-        {
-            // fill missing new rooms without overwriting user choices
-            foreach (var r in DefaultImportantRooms)
-            {
-                if (!Settings.RoomTierOverrides.ContainsKey(r.Tier1Name))
-                    Settings.RoomTierOverrides[r.Tier1Name] = (int)r.Rank;
-            }
+            if (string.IsNullOrWhiteSpace(r.Tier1Name)) continue;
+            if (overwrite || !target.ContainsKey(r.Tier1Name))
+                target[r.Tier1Name] = (int)r.Rank;
         }
     }
 
-    public void LoadDefaultStrategy()
+    private void ResetWeightsToDefaults()
     {
         Settings.WeightTier.Value = 10;
         Settings.WeightUpgrade.Value = 2;
@@ -274,9 +302,22 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
         Settings.WeightUpgradeLate.Value = 4;
         Settings.WeightSTierBonus.Value = 1;
         Settings.WeightUntieredPenalty.Value = 5;
+    }
+
+    private void EnsureRoomTierOverrides()
+    {
+        if (Settings.RoomTierOverrides == null) Settings.RoomTierOverrides = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (Settings.RoomTierOverrides.Count == 0)
+            PopulateRoomTierOverridesFromDefaults(Settings.RoomTierOverrides, DefaultImportantRooms, false);
+        else
+            PopulateRoomTierOverridesFromDefaults(Settings.RoomTierOverrides, DefaultImportantRooms, false);
+    }
+
+    public void LoadDefaultStrategy()
+    {
+        ResetWeightsToDefaults();
         Settings.RoomTierOverrides.Clear();
-        foreach (var r in DefaultImportantRooms)
-            Settings.RoomTierOverrides[r.Tier1Name] = (int)r.Rank;
+        PopulateRoomTierOverridesFromDefaults(Settings.RoomTierOverrides, DefaultImportantRooms, true);
         LogMessage("Loaded default Meta Profit strategy (Locus/Doryani S-tier focus).");
     }
 
@@ -301,22 +342,26 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
     public void ResetRoomTiers()
     {
         Settings.RoomTierOverrides.Clear();
-        foreach (var r in DefaultImportantRooms)
-            Settings.RoomTierOverrides[r.Tier1Name] = (int)r.Rank;
+        PopulateRoomTierOverridesFromDefaults(Settings.RoomTierOverrides, DefaultImportantRooms, true);
         LogMessage("Room tiers reset to defaults.");
     }
+
+    // Centralized Repeated Switch: single rank->color mapping (also used by SettingsUi)
+    private ColorNode ColorNodeForRank(TierRank rank) => rank switch
+    {
+        TierRank.S => Settings.STierColor,
+        TierRank.A => Settings.ATierColor,
+        TierRank.B => Settings.BTierColor,
+        TierRank.C => Settings.CTierColor,
+        _ => Settings.UntieredRoomColor
+    };
+
+    private SharpDX.Color ColorForRank(TierRank rank) => ColorNodeForRank(rank).Value;
 
     private ColorNode ColorFor(RoomInfo info)
     {
         if (info == null) return Settings.CTierColor;
-        return GetEffectiveRank(info) switch
-        {
-            TierRank.S => Settings.STierColor,
-            TierRank.A => Settings.ATierColor,
-            TierRank.B => Settings.BTierColor,
-            TierRank.C => Settings.CTierColor,
-            _ => Settings.UntieredRoomColor
-        };
+        return ColorNodeForRank(GetEffectiveRank(info));
     }
 
     public override bool Initialise()
@@ -401,27 +446,47 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
         }
     }
 
+    // Unified scoring for doors and architects - Spec fix: door scoring previously diverged from architect scoring
+    private int ScoreDoor(RoomInfo info, HashSet<string> visibleRooms)
+    {
+        if (info == null) return 0;
+        var effRank = GetEffectiveRank(info);
+        if (effRank == TierRank.Untiered) return -Settings.WeightUntieredPenalty.Value;
+        int score = GetEffectiveTierValue(info) * Settings.WeightTier.Value;
+        if (effRank == TierRank.S) score += Settings.WeightSTierBonus.Value;
+        // scarcity: target T3 not yet on map (same weight as architect picks)
+        if (!string.IsNullOrWhiteSpace(info.Tier3Name) && visibleRooms != null && !visibleRooms.Contains(info.Tier3Name.Trim()))
+            score += Settings.WeightScarcity.Value;
+        else if (!string.IsNullOrWhiteSpace(info.Tier1Name) && visibleRooms != null && !visibleRooms.Contains(info.Tier1Name.Trim()) && info.IsUntiered)
+            score += Settings.WeightScarcity.Value;
+        return score;
+    }
+
     private void DrawConnections(Element incursionRooms)
     {
         if (!Settings.EnableConnections.Value) return;
         if (incursionRooms == null || IncursionPanel == null) return;
-        Element selectedRoom = null;
-        foreach (var item in incursionRooms.Children)
-        {
-            var hl = SafeGet(item, 2);
-            if (hl != null && hl.IsVisible) { selectedRoom = item; break; }
-        }
+        var selectedRoom = TryGetSelectedRoom(incursionRooms);
         if (selectedRoom == null) return;
-        var diamond = SafeGet(IncursionPanel, 3, 13, 0);
+        var diamond = TryGetDiamond(IncursionPanel);
         if (diamond == null || !diamond.IsVisible) return;
         var selRect = selectedRoom.GetClientRectCache;
         var selCenter = new Vector2(selRect.X + selRect.Width * 0.5f, selRect.Y + selRect.Height * 0.5f);
         var map = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase);
+        var visibleForScarcity = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in incursionRooms.Children)
         {
             var nEl = SafeGet(item, 0, 0);
             if (nEl == null || string.IsNullOrWhiteSpace(nEl.Text)) continue;
-            map[nEl.Text.Trim()] = item.GetClientRectCache;
+            var trimmed = nEl.Text.Trim();
+            map[trimmed] = item.GetClientRectCache;
+            visibleForScarcity.Add(trimmed);
+            var li = Lookup(trimmed);
+            if (li != null)
+            {
+                if (!string.IsNullOrWhiteSpace(li.Tier3Name)) visibleForScarcity.Add(li.Tier3Name.Trim());
+                if (!string.IsNullOrWhiteSpace(li.Tier2Name)) visibleForScarcity.Add(li.Tier2Name.Trim());
+            }
         }
         string bestLockedName = null;
         RoomInfo bestLockedInfo = null;
@@ -430,7 +495,7 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
         int bestLockedScore = -999;
         int bestLockedIdx = -1;
         int diamondChildCount = (int)diamond.ChildCount;
-        // first pass: find best locked to highlight as green
+        // first pass: find best locked to highlight as green (unified scoring)
         for (int i = 3; i < diamondChildCount && i <= 8; i++)
         {
             var dotParent = SafeGet(diamond, i);
@@ -442,9 +507,8 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
             if (!TryParseDoorTarget(tip.Text, out var target, out var isUnlocked)) continue;
             if (isUnlocked) continue;
             var tInfo = Lookup(target);
-            int sc = tInfo != null ? GetEffectiveTierValue(tInfo) * Settings.WeightTier.Value : 0;
-            if (tInfo != null && GetEffectiveRank(tInfo) == TierRank.S) sc += Settings.WeightSTierBonus.Value;
-            if (tInfo != null && GetEffectiveRank(tInfo) == TierRank.Untiered) sc -= Settings.WeightUntieredPenalty.Value;
+            int sc = ScoreDoor(tInfo, visibleForScarcity);
+            if (tInfo == null) sc = -Settings.WeightUntieredPenalty.Value;
             if (sc > bestLockedScore)
             {
                 bestLockedScore = sc;
@@ -562,31 +626,24 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
         Element r2El = SafeGet(IncursionPanel, 3, 13, 4);
         Element bestEl = null;
 
-        Element changeIcon = SafeGet(IncursionPanel, 3, 13, 0, 1);
-        Element upgradeIcon = SafeGet(IncursionPanel, 3, 13, 0, 2);
-
         string bestName;
         RoomInfo bestInfo;
         bool bestIsUp;
-        Element bestIcon = null;
 
-        // no frames around architect names - data already visible, frames are bloat
+        // no frames around architect names - data already visible, frames are bloat (removed dead bestIcon icon framing)
         if (s1 > s2 || (s1 == s2 && r1Up && remaining <= 4))
         {
             bestName = r1Name; bestEl = r1El; bestInfo = r1Info; bestIsUp = r1Up;
-            bestIcon = r1Up ? upgradeIcon : r1Ch ? changeIcon : null;
         }
         else if (s2 > s1 || !string.IsNullOrWhiteSpace(r2Name))
         {
             if (s1 == s2 && r1Up && remaining <= 4)
             {
                 bestName = r1Name; bestEl = r1El; bestInfo = r1Info; bestIsUp = r1Up;
-                bestIcon = r1Up ? upgradeIcon : r1Ch ? changeIcon : null;
             }
             else
             {
                 bestName = r2Name; bestEl = r2El; bestInfo = r2Info; bestIsUp = r2Up;
-                bestIcon = r2Up ? upgradeIcon : r2Ch ? changeIcon : null;
             }
         }
         else
@@ -612,7 +669,7 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
             if (window == null || !window.IsVisible) return;
             IncursionPanel = window;
 
-            Element incursionRooms = SafeGet(IncursionPanel, 3);
+            Element incursionRooms = TryGetIncursionRooms(IncursionPanel);
             if (incursionRooms == null) return;
 
             ProcessCurrentRooms(incursionRooms);
@@ -653,7 +710,7 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
                 catch { }
             }
 
-            // hover tooltip: if mouse over best choice, show one-line reason
+            // hover tooltip: if mouse over best choice, show one-line reason (fixed: change uses parsed bestName not Tier3)
             if (bestEl != null && bestInfo != null)
             {
                 try
@@ -662,9 +719,10 @@ public partial class IncursionHelper : BaseSettingsPlugin<IncursionHelperSetting
                     var rect = bestEl.GetClientRectCache;
                     if (rect.Contains(mouse.X, mouse.Y))
                     {
-                        var reason = bestIsUp ? $"Upgrade to {bestInfo.Tier3Name} ({bestInfo.Tier})" : $"Change to {bestInfo.Tier3Name} ({bestInfo.Tier})";
+                        string reason;
                         if (bestInfo.IsUntiered) reason = bestName;
-                        else reason += $" - {bestInfo.Description}";
+                        else if (bestIsUp) reason = $"Upgrade to {bestInfo.Tier3Name} ({bestInfo.Tier}) - {bestInfo.Description}";
+                        else reason = $"Change to {bestName} ({bestInfo.Tier}) - {bestInfo.Description}";
                         var tp = new Vector2(rect.Right + 8, rect.Top);
                         var tsz = Graphics.MeasureText(reason);
                         var tr = new RectangleF(tp.X, tp.Y, tsz.X + 10, tsz.Y + 6);

@@ -7,7 +7,7 @@ namespace IncursionHelper;
 
 public class IncursionHelperSettings : ISettings
 {
-    public ToggleNode Enable { get; set; } = new ToggleNode(false);
+    public ToggleNode Enable { get; set; } = new ToggleNode(true);
 
     [Menu("Draw tier frames on temple rooms", "Frames around each temple room colored by weighted tier.")]
     public ToggleNode EnableTierFrames { get; set; } = new ToggleNode(true);
